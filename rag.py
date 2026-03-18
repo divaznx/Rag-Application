@@ -12,11 +12,11 @@ from langchain_core.runnables import RunnablePassthrough, RunnableParallel
 load_dotenv()
 
 CHROMA_DIR = "./vectorstore"
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 150
-RETRIEVER_K = 4
+CHUNK_SIZE = 500
+CHUNK_OVERLAP = 100
+RETRIEVER_K = 6
 
-RAG_PROMPT = ChatPromptTemplate.from_template("""You are a helpful assistant answering questions strictly based on the provided document context.
+RAG_PROMPT = ChatPromptTemplate.from_template("""You are a helpful assistant answering questions based on the provided document context.
 
 Context:
 {context}
@@ -24,9 +24,9 @@ Context:
 Question: {question}
 
 Instructions:
-- Answer only from the context above.
-- If the answer is not in the context, say "I couldn't find that in the document."
-- Be concise and factual. Cite relevant sections when helpful.
+- Answer based on the context above.
+- If the answer is truly not in the context, say "I couldn't find that in the document."
+- Be concise and factual.
 
 Answer:""")
 
@@ -40,11 +40,19 @@ def load_and_index_pdf(pdf_path: str):
     loader = PyPDFLoader(pdf_path)
     documents = loader.load()
 
+    # Debug: print first page content to terminal
+    print("\n===== PDF LOAD CHECK =====")
+    print(f"Total pages loaded: {len(documents)}")
+    if documents:
+        print(f"First page preview:\n{documents[0].page_content[:500]}")
+    print("==========================\n")
+
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
     )
     chunks = splitter.split_documents(documents)
+    print(f"Total chunks created: {len(chunks)}")
 
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
     vectorstore = Chroma.from_documents(
@@ -78,6 +86,14 @@ def build_rag_chain(vectorstore: Chroma):
 def ask(chain, question: str) -> dict:
     """Run a question and return answer + sources."""
     result = chain.invoke({"question": question})
+
+    # Debug: print retrieved chunks to terminal
+    print("\n===== RETRIEVED CHUNKS =====")
+    for i, doc in enumerate(result["source_documents"]):
+        print(f"\n--- Chunk {i+1} (Page {doc.metadata.get('page', '?')}) ---")
+        print(doc.page_content[:300])
+    print("============================\n")
+
     answer = result["answer"]
 
     sources = []
