@@ -16,10 +16,11 @@ if not os.getenv("OPENAI_API_KEY"):
 # ── App state ──────────────────────────────────────────────────────────────
 current_chain = None
 current_pdf_name = None
+current_vectorstore = None
 
 
 def upload_and_index(pdf_file):
-    global current_chain, current_pdf_name
+    global current_chain, current_pdf_name, current_vectorstore
 
     if pdf_file is None:
         return (
@@ -28,11 +29,28 @@ def upload_and_index(pdf_file):
             gr.update(interactive=False),
         )
 
+    # Release ChromaDB lock before deleting the folder (Windows fix)
+    if current_vectorstore is not None:
+        try:
+            current_vectorstore._client._system.stop()
+        except Exception:
+            pass
+        current_vectorstore = None
+        current_chain = None
+
     if os.path.exists("./vectorstore"):
-        shutil.rmtree("./vectorstore")
+        try:
+            shutil.rmtree("./vectorstore")
+        except PermissionError:
+            return (
+                "❌ Could not clear old vectorstore. Restart the app and try again.",
+                gr.update(interactive=False),
+                gr.update(interactive=False),
+            )
 
     try:
         vectorstore, n_chunks = load_and_index_pdf(pdf_file)
+        current_vectorstore = vectorstore
         current_chain = build_rag_chain(vectorstore)
         current_pdf_name = os.path.basename(pdf_file)
         status = f"✅ **{current_pdf_name}** indexed — {n_chunks} chunks. Ready to chat!"
@@ -122,17 +140,6 @@ with gr.Blocks(title="PDF RAG — Ask Your Document") as demo:
                 )
                 ask_btn = gr.Button("Ask ➤", variant="primary", scale=1, interactive=False)
             clear_btn = gr.Button("🗑️ Clear Chat", variant="secondary", size="sm")
-
-    with gr.Accordion("🔍 How it works", open=False):
-       with gr.Accordion("🔍 How it works", open=False):
-        gr.Markdown(
-            "1. **PDF → Pages** — PyPDFLoader extracts text page by page.\n"
-            "2. **Chunking** — RecursiveCharacterTextSplitter splits into 1000-char chunks with 150-char overlap.\n"
-            "3. **Embedding** — Each chunk is embedded with text-embedding-3-small (OpenAI).\n"
-            "4. **ChromaDB** — Embeddings are stored locally in ./vectorstore.\n"
-            "5. **Retrieval** — Your question is embedded; top-4 similar chunks are fetched.\n"
-            "6. **Generation** — GPT-4o answers strictly from those chunks via a RAG prompt."
-        )
 
     # ── Events ──
     index_btn.click(
